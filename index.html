@@ -308,13 +308,24 @@
             try {
                 const response = await fetch(VPS_API_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': '7873&;@:$/);&;84$:&;73638($' },
+                    mode: 'cors', // Explicitly set the mode
+                    cache: 'no-cache', // Do not cache this request
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'x-api-key': '7873&;@:$/);&;84$:&;73638($' 
+                    },
                     body: JSON.stringify({ to, subject, htmlBody }),
                 });
-                if (!response.ok) throw new Error('Email service HTTP ' + response.status);
+
+                if (!response.ok) {
+                    const errorBody = await response.text();
+                    console.error('Email service responded with an error:', response.status, errorBody);
+                    throw new Error(`Email service HTTP ${response.status}`);
+                }
                 return true;
             } catch (error) {
-                console.error('Failed to send email:', error);
+                // This will now log the detailed error object to the console
+                console.error('Full error object from sendEmail fetch:', error);
                 throw error; // Re-throw to be caught by the caller
             }
         };
@@ -338,10 +349,8 @@
             <div class="min-h-screen flex items-center justify-center p-3 sm:p-4">
                 <div class="w-full max-w-md bg-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 sm:space-y-8 text-center animate-fade-in">
                     <header class="space-y-4">
-                        <div class="flex justify-between items-center">
-                            <div class="w-12"></div>
+                        <div class="flex justify-center items-center">
                             <img src="https://pccvehicle.github.io/vehicle-clearance-/car_logo.jpg" alt="Car Logo" class="w-48 h-auto mx-auto" onerror="this.onerror=null; this.src='https://placehold.co/192x108/1e293b/94a3b8?text=Logo';">
-                            <div class="w-12"></div>
                         </div>
                         <div>
                             <h1 class="text-4xl font-bold tracking-tight text-white mt-4">Vehicle Clearance</h1>
@@ -611,6 +620,7 @@
                                 await sendEmail(payload.requesterEmail, emailSubject, emailBody);
                             } catch (emailError) {
                                 emailErrorOccurred = true;
+                                console.error('Error caught in submit handler:', emailError);
                                 showNotification("Request submitted, but confirmation email failed to send.", "error");
                             }
                         }
