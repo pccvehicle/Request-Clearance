@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
+    <title>Vehicle Clearance Request</title>
+    <!-- The manifest is now generated and injected by the script below -->
+    <link rel="apple-touch-icon" href="https://pccvehicle.github.io/vehicle-clearance-/apple-touch-icon.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background-color: #1e293b; /* Dark Slate Blue */
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        
+        input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+        }
+        .mobile-input {
+            width: 100%;
+            max-width: 100%;
+            font-size: 16px;
+            padding: 0.75rem;
+            box-sizing: border-box;
+        }
+        .mobile-button {
+            min-height: 44px;
+            padding: 0.75rem 1rem;
+            font-size: clamp(0.875rem, 3.5vw, 1rem);
+        }
+        .mobile-vehicle-number {
+            font-size: clamp(1rem, 5vw, 1.5rem);
+            letter-spacing: 0.05em;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-root"></div>
+
+    <script>
+        // --- Single File Setup: Manifest and Service Worker ---
+        (function() {
+            // 1. Generate and inject the Web App Manifest
+            const manifestContent = {
+                "name": "Vehicle Clearance Request",
+                "short_name": "Clearance",
+                "start_url": ".",
+                "display": "standalone",
+                "background_color": "#1e293b",
+                "theme_color": "#1e293b",
+                "description": "A standalone application to request vehicle clearance.",
+                "icons": [{
+                    "src": "https://pccvehicle.github.io/vehicle-clearance-/car_logo_192.png",
+                    "sizes": "192x192",
+                    "type": "image/png"
+                }, {
+                    "src": "https://pccvehicle.github.io/vehicle-clearance-/car_logo_512.png",
+                    "sizes": "512x512",
+                    "type": "image/png"
+                }]
+            };
+            const manifestString = JSON.stringify(manifestContent);
+            const manifestBlob = new Blob([manifestString], { type: 'application/json' });
+            const manifestUrl = URL.createObjectURL(manifestBlob);
+            const manifestLink = document.createElement('link');
+            manifestLink.rel = 'manifest';
+            manifestLink.href = manifestUrl;
+            document.head.appendChild(manifestLink);
+
+            // 2. Generate the Service Worker code as a Blob
+            const serviceWorkerCode = `
+                importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js');
+                importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js');
+
+                const DB_NAME = 'vehicle-clearance-requests';
+                const DB_VERSION = 1;
+                const STORE_NAME = 'offline-requests';
+
+                function openSyncDb() {
+                    return new Promise((resolve, reject) => {
+                        const request = indexedDB.open(DB_NAME, DB_VERSION);
+                        request.onupgradeneeded = (event) => {
+                            const db = event.target.result;
+                            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                                db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                            }
+                        };
+                        request.onsuccess = (event) => resolve(event.target.result);
+                        request.onerror = (event) => reject('IndexedDB error: ' + event.target.errorCode);
+                    });
+                }
+                async function getQueuedRequests() {
+                    const db = await openSyncDb();
+                    return new Promise((resolve, reject) => {
+                        const transaction = db.transaction([STORE_NAME], 'readonly');
+                        const store = transaction.objectStore(STORE_NAME);
+                        const request = store.getAll();
+                        request.onsuccess = (event) => resolve(event.target.result);
+                        request.onerror = (event) => reject(event.target.error);
+                    });
+                }
+                async function clearSyncedRequests() {
+                    const db = await openSyncDb();
+                    return new Promise((resolve, reject) => {
+                        const transaction = db.transaction([STORE_NAME], 'readwrite');
+                        const store = transaction.objectStore(STORE_NAME);
+                        const request = store.clear();
+                        request.onsuccess = () => resolve();
+                        request.onerror = (event) => reject(event.target.error);
+                    });
+                }
+                
+                const firebaseConfig = {
+                    apiKey: "AIzaSyC51Zo7V75JjOpLOdusf6ZKUzEG_gqFcV4",
+                    authDomain: "vehicle-clearance.firebaseapp.com",
+                    projectId: "vehicle-clearance",
+                    storageBucket: "vehicle-clearance.appspot.com",
+                    messagingSenderId: "187403368572",
+                    appId: "1:187403368572:web:1f94845da67ef0c7ccf1f9"
+                };
+
+                firebase.initializeApp(firebaseConfig);
+                const db = firebase.firestore();
+
+                self.addEventListener('install', (event) => { self.skipWaiting(); });
+                self.addEventListener('activate', (event) => { event.waitUntil(clients.claim()); });
+                self.addEventListener('fetch', (event) => { event.respondWith(fetch(event.request)); });
+
+                self.addEventListener('sync', (event) => {
+                    if (event.tag === 'sync-requests') {
+                        event.waitUntil(syncOfflineRequests());
+                    }
+                });
+
+                async function syncOfflineRequests() {
+                    try {
+                        const queuedRequests = await getQueuedRequests();
+                        if (!queuedRequests.length) return;
+
+                        const promises = queuedRequests.map(req => {
+                            const payload = { ...req };
+                            if (payload.entryDate) payload.entryDate = firebase.firestore.Timestamp.fromDate(new Date(payload.entryDate));
+                            if (payload.expiryDate) payload.expiryDate = firebase.firestore.Timestamp.fromDate(new Date(payload.expiryDate));
+                            if (payload.createdAt) payload.createdAt = firebase.firestore.Timestamp.fromDate(new Date(payload.createdAt));
+                            delete payload.id;
+                            return db.collection('clearanceRequests').add(payload);
+                        });
+
+                        await Promise.all(promises);
+                        await clearSyncedRequests();
+                    } catch (error) {
+                        console.error('SW Sync Error:', error);
+                    }
+                }
+            `;
+            const swBlob = new Blob([serviceWorkerCode], { type: 'application/javascript' });
+            const swUrl = URL.createObjectURL(swBlob);
+
+            // 3. Register the Service Worker
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register(swUrl)
+                        .then(reg => console.log('ServiceWorker registered.', reg))
+                        .catch(err => console.error('ServiceWorker registration failed:', err));
+                });
+            }
+
+            // --- Expose Background Sync functions to the global scope for the main app script ---
+            window.saveRequestForSync = async function(requestData) {
+                const db = await openSyncDb();
+                 if (requestData.entryDate?.toDate) requestData.entryDate = requestData.entryDate.toDate();
+                if (requestData.expiryDate?.toDate) requestData.expiryDate = requestData.expiryDate.toDate();
+                if (requestData.createdAt?.toDate) requestData.createdAt = requestData.createdAt.toDate();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([STORE_NAME], 'readwrite');
+                    const request = transaction.objectStore(STORE_NAME).add(requestData);
+                    request.onsuccess = resolve;
+                    request.onerror = reject;
+                });
+            };
+            window.registerBackgroundSync = async function() {
+                if ('serviceWorker' in navigator && 'SyncManager' in window) {
+                    const registration = await navigator.serviceWorker.ready;
+                    await registration.sync.register('sync-requests');
+                }
+            };
+        })();
+    </script>
+    
+    <script type="module">
+        // --- Main Application Logic ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, Timestamp, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Configuration ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyC51Zo7V75JjOpLOdusf6ZKUzEG_gqFcV4",
+            authDomain: "vehicle-clearance.firebaseapp.com",
+            projectId: "vehicle-clearance",
+            storageBucket: "vehicle-clearance.appspot.com",
+            messagingSenderId: "187403368572",
+            appId: "1:187403368572:web:1f94845da67ef0c7ccf1f9"
+        };
+
+        const appRoot = document.getElementById("app-root");
+        let app, auth, db;
+        let routeHistory = [];
+
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } catch (err) {
+            console.error("Firebase initialization error:", err);
+            appRoot.innerHTML = `<div class="p-8 text-center text-red-500 bg-red-100 rounded-lg"><b>Error:</b> Firebase initialization failed.</div>`;
+        }
+
+        const icons = {
+            request: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"></path><path d="M9 18h6"></path><path d="M2 22v-2a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v2"></path></svg>`,
+            search: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>`,
+            x: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+        };
+
+        const formatDate = (date) => {
+            if (!date) return "N/A";
+            const d = date instanceof Date ? date : (date.toDate ? date.toDate() : new Date(date));
+            return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
+        };
+
+        const showNotification = (message, type = "success") => {
+            const notification = document.createElement("div");
+            const bgColor = type === "success" ? "bg-green-500" : type === "error" ? "bg-red-500" : "bg-blue-500";
+            notification.className = `fixed bottom-5 right-5 p-4 rounded-lg shadow-lg text-white flex items-center animate-fade-in z-[100] ${bgColor} max-w-sm`;
+            const icon = type === "success" ? "✓" : type === "error" ? "✗" : "ℹ";
+            notification.innerHTML = `<span class="mr-3 text-lg">${icon}</span><span>${message}</span>`;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 4000);
+        };
+        
+        const parseLocalDate = (dateString) => {
+            if (!dateString) return null;
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return null;
+            const userTimezoneOffset = date.getTimezoneOffset() * 60000;
+            return new Date(date.getTime() + userTimezoneOffset);
+        };
+
+        const getFormObj = form => Object.fromEntries(new FormData(form).entries());
+
+        const goBack = () => {
+            if (routeHistory.length > 0) {
+                const renderPrevious = routeHistory.pop();
+                renderPrevious();
+            } else {
+                renderLandingPage();
+            }
+        };
+        
+        const generateNotificationEmail = (status, data) => {
+            const orgName = "PCC Security";
+            const footerText = `This is an automated notification from the Vehicle Clearance System. Please do not reply to this email.`;
+
+            const template = (title, content) => `
+                <div style="font-family: Inter, Arial, sans-serif; font-size: 16px; line-height: 1.6; color: #333; max-width: 600px; margin: 20px auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+                    <div style="background-color: #0f172a; color: #ffffff; padding: 20px; text-align: center;">
+                        <h1 style="margin: 0; font-size: 24px;">Vehicle Clearance System</h1>
+                    </div>
+                    <div style="padding: 25px;">
+                        <h2 style="font-size: 20px; color: #1e293b; margin-top: 0;">${title}</h2>
+                        ${content}
+                        <p style="margin-top: 25px;">Regards,<br/><b>${orgName}</b></p>
+                    </div>
+                    <div style="background-color: #f1f5f9; color: #64748b; padding: 15px; text-align: center; font-size: 12px;">
+                        ${footerText}
+                    </div>
+                </div>`;
+
+            let title = '';
+            let content = '';
+
+            if (status === 'pending') {
+                title = 'Request Received';
+                content = `
+                    <p>Hi ${data.requesterName || 'User'},</p>
+                    <p>Thank you for your submission. Your vehicle clearance request for <b>${data.vehicleNumber}</b> is now pending review.</p>
+                    <p>You will receive another email once the status of your request is updated.</p>
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+                    <p style="font-size: 14px; color: #475569;"><b>Submitted On:</b> ${data.submittedAt}</p>
+                `;
+            }
+            return template(title, content);
+        };
+
+        const sendEmail = async (to, subject, htmlBody) => {
+            const VPS_API_URL = 'https://email.th3va.com/send-email';
+            try {
+                const response = await fetch(VPS_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': '7873&;@:$/);&;84$:&;73638($' },
+                    body: JSON.stringify({ to, subject, htmlBody }),
+                });
+                if (!response.ok) throw new Error('Email service HTTP ' + response.status);
+                return true;
+            } catch (error) {
+                console.error('Failed to send email:', error);
+                throw error; // Re-throw to be caught by the caller
+            }
+        };
+
+        // --- Render Functions ---
+        const renderLandingPage = (options = {}) => {
+            const { trackingResultHTML = "", vehicleNumber = "" } = options;
+            document.body.className = 'bg-slate-900';
+
+            let trackingSection = '';
+            if (trackingResultHTML) {
+                trackingSection = `
+                <div class="mt-6 space-y-4">
+                    <h3 class="text-sm font-medium text-slate-300">Tracking Result:</h3>
+                    ${trackingResultHTML}
+                    <button id="clear-tracking-btn" class="w-full px-4 py-2 text-sm bg-slate-700/50 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors">Clear Result</button>
+                </div>`;
+            }
+
+            appRoot.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center p-3 sm:p-4">
+                <div class="w-full max-w-md bg-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 sm:space-y-8 text-center animate-fade-in">
+                    <header class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <a href="https://pccvehicle.github.io/vehicle-clearance-/userguide" target="_blank" title="User Guide" class="text-sm text-blue-300 hover:text-white">
+                            📘 Guide
+                            </a>
+                            <img src="https://pccvehicle.github.io/vehicle-clearance-/car_logo.jpg" alt="Car Logo" class="w-48 h-auto mx-auto" onerror="this.onerror=null; this.src='https://placehold.co/192x108/1e293b/94a3b8?text=Logo';">
+                            <div class="w-12"></div>
+                        </div>
+                        <div>
+                            <h1 class="text-4xl font-bold tracking-tight text-white mt-4">Vehicle Clearance</h1>
+                            <p class="text-slate-400 mt-2">Your gateway to seamless access.</p>
+                        </div>
+                    </header>
+
+                    <main class="space-y-4">
+                        <button id="request-btn" class="w-full flex items-center justify-center gap-3 p-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-all duration-300 transform hover:scale-105 shadow-lg shadow-blue-600/20">
+                            <div class="w-6 h-6">${icons.request}</div>
+                            <span class="font-semibold text-lg">Request Clearance</span>
+                        </button>
+                    </main>
+
+                    <footer class="pt-8">
+                        <form id="track-request-form" class="space-y-3">
+                            <label class="text-sm font-medium text-slate-400">Or, track an existing request.</label>
+                            <div class="flex gap-2">
+                                <input id="track-id-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g, '')" class="mobile-input block w-full px-4 py-2 bg-slate-900/70 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter Vehicle Number" value="${vehicleNumber}" style="text-transform: uppercase;">
+                                <button type="submit" class="flex items-center justify-center px-4 py-2 rounded-lg text-white bg-slate-700 hover:bg-slate-600 transition-colors">
+                                    <span class="w-5 h-5">${icons.search}</span>
+                                </button>
+                            </div>
+                        </form>
+                        <div id="tracking-result">${trackingSection}</div>
+                    </footer>
+                </div>
+            </div>`;
+        };
+
+        const renderRequestForm = () => {
+            const now = new Date();
+            const cutOffHour = 14;
+            let minDate = new Date();
+            if (now.getHours() >= cutOffHour) {
+                minDate.setDate(minDate.getDate() + 1);
+            }
+            const minDateString = minDate.toISOString().split('T')[0];
+
+            appRoot.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center p-4">
+                <div class="w-full max-w-lg bg-slate-800/80 backdrop-blur-sm border border-yellow-500/20 rounded-2xl shadow-2xl shadow-yellow-900/20 p-8 space-y-6 animate-fade-in">
+                    <div class="text-center">
+                        <div class="w-12 h-12 mx-auto text-yellow-400">${icons.request}</div>
+                        <h1 class="text-3xl font-bold text-white mt-4">Request Vehicle Clearance</h1>
+                        <p class="text-slate-400">Fill in the details below</p>
+                    </div>
+                    <form id="request-form" class="space-y-4 text-left" novalidate>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Your Name</label>
+                            <input name="requesterName" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" placeholder="e.g. John Doe" required />
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Your Email Address</label>
+                            <input type="email" name="requesterEmail" placeholder="you@example.com" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required />
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Your Contact Number</label>
+                            <input type="tel" name="requesterContact" placeholder="e.g., 65 8779 9808" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required />
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Vehicle Number</label>
+                            <input name="vehicleNumber" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g, '')" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required style="text-transform: uppercase;">
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Vehicle Type</label>
+                            <select name="vehicleType" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required>
+                                <option value="">Select type...</option>
+                                <option>Car</option>
+                                <option>Motorcycle</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Location</label>
+                            <select name="location" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required>
+                                <option value="PCC" selected>PCC</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Visiting Hours</label>
+                            <select name="timeSlot" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required>
+                                <option value="">Select a time slot...</option>
+                                <option value="08:00-13:00">08:00 to 13:00</option>
+                                <option value="08:00-18:00">08:00 to 18:00</option>
+                                <option value="13:00-18:00">13:00 to 18:00</option>
+                                <option value="18:00-onwards">18:00 onwards</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="text-sm font-medium text-slate-300">Entry Date</label>
+                                <input type="date" id="request-entry-date" name="entryDate" min="${minDateString}" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required />
+                            </div>
+                            <div>
+                                <label class="text-sm font-medium text-slate-300">Expiry Date</label>
+                                <input type="date" id="request-expiry-date" name="expiryDate" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border-slate-700 rounded-lg text-white bg-gray-700 cursor-not-allowed" required readonly />
+                            </div>
+                        </div>
+                        <p class="text-xs text-yellow-400 mt-2">Requests for today must be submitted before 14:00hrs.</p>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Purpose of Entry</label>
+                            <select id="notes-purpose-select" name="notes_purpose" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white">
+                                <option value="Meeting">Meeting</option>
+                                <option value="Other">Other</option>
+                            </select>
+                             <input type="text" id="notes-other-input" name="notes_other" class="hidden mobile-input mt-2 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" placeholder="Please specify purpose" />
+                        </div>
+                        <div class="flex justify-between pt-4">
+                            <button id="back-btn" type="button" class="px-6 py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 mobile-button">Back</button>
+                            <button type="submit" class="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 mobile-button">Submit Request</button>
+                        </div>
+                    </form>
+                </div>
+            </div>`;
+        };
+
+        const createStatusCard = (r) => {
+            const statusConfig = {
+                approved: { text: "APPROVED", color: "text-green-400", bg: "bg-green-500/10", border: "border-green-500/20" },
+                rejected: { text: "REJECTED", color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20" },
+                pending: { text: "PENDING", color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20" },
+                active: { text: "ACTIVE CLEARANCE", color: "text-green-400", bg: "bg-green-500/10", border: "border-green-500/20" },
+                expired: { text: "EXPIRED", color: "text-gray-400", bg: "bg-gray-500/10", border: "border-gray-500/20" }
+            };
+
+            const config = statusConfig[r.status] || statusConfig.pending;
+            const timeSlotText = r.timeSlot ? r.timeSlot.replace('-', ' to ').replace('onwards', ' onwards') : 'N/A';
+            const contact = r.requesterContact || r.ownerContact || 'N/A';
+            const name = r.requesterName || r.ownerName || 'N/A';
+
+            return `
+            <div class="p-4 ${config.bg} ${config.border} rounded-xl border text-left animate-fade-in">
+                <div class="flex justify-between items-start mb-3">
+                    <div>
+                        <p class="text-sm text-slate-400">Vehicle</p>
+                        <p class="font-mono text-xl font-bold text-blue-400 mobile-vehicle-number">${r.vehicleNumber}</p>
+                        <p class="text-xs text-slate-400">${r.vehicleType || "Car"}</p>
+                    </div>
+                    <span class="px-2 py-1 rounded-full text-xs font-medium ${config.color} ${config.bg} border ${config.border}">${config.text}</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <div><p class="text-xs text-slate-400">Name</p><p class="font-semibold text-slate-200">${name}</p></div>
+                    <div><p class="text-xs text-slate-400">Contact</p><p class="font-semibold text-slate-200">${contact}</p></div>
+                    <div><p class="text-xs text-slate-400">Location</p><p class="font-semibold text-slate-200">${r.location}</p></div>
+                    <div><p class="text-xs text-slate-400">Visiting Hours</p><p class="font-semibold text-slate-200">${timeSlotText}</p></div>
+                    <div class="col-span-2"><p class="text-xs text-slate-400">Valid Period</p><p class="font-semibold text-slate-200">${formatDate(r.entryDate)} - ${formatDate(r.expiryDate)}</p></div>
+                </div>
+                ${r.notes ? `<div class="mt-3 pt-3 border-t border-slate-600"><p class="text-xs text-slate-400">Purpose</p><p class="text-sm text-slate-300">${r.notes}</p></div>` : ""}
+                ${r.rejectionReason ? `<div class="mt-3 pt-3 border-t border-red-500/20"><p class="text-xs text-red-400">Rejection Reason</p><p class="text-sm text-red-300">${r.rejectionReason}</p></div>` : ""}
+            </div>`;
+        };
+        
+        const findCurrentVehicleStatus = async (vehicleNumber) => {
+            const now = new Date();
+            const clearanceQuery = query(collection(db, "vehicleClearances"), where("vehicleNumber", "==", vehicleNumber));
+            const clearanceSnap = await getDocs(clearanceQuery);
+            const activeClearance = clearanceSnap.docs
+                .map(doc => ({ id: doc.id, ...doc.data() }))
+                .find(data => data.expiryDate.toDate() >= now);
+
+            if (activeClearance) return { ...activeClearance, status: "active" };
+
+            const requestQuery = query(collection(db, "clearanceRequests"), where("vehicleNumber", "==", vehicleNumber));
+            const requestSnap = await getDocs(requestQuery);
+            const allRequests = requestSnap.docs
+                .map(doc => ({ id: doc.id, ...doc.data() }))
+                .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+
+            if (allRequests.length > 0) return allRequests[0];
+
+            const allClearances = clearanceSnap.docs
+                .map(doc => ({ id: doc.id, ...doc.data() }))
+                .sort((a, b) => (b.expiryDate?.toMillis() || 0) - (a.expiryDate?.toMillis() || 0));
+
+            if (allClearances.length > 0) return { ...allClearances[0], status: "expired" };
+
+            return null;
+        };
+
+
+        // --- App Initialization ---
+        renderLandingPage();
+
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                try { await signInAnonymously(auth); } catch (e) { console.error("Anonymous sign-in failed", e); }
+            }
+        });
+
+        // --- Event Listeners ---
+        document.body.addEventListener("click", async (e) => {
+            const button = e.target.closest('button');
+            if (!button) return;
+
+            if (button.id === "request-btn") {
+                routeHistory.push(() => renderLandingPage());
+                renderRequestForm();
+            } else if (button.id === "back-btn") {
+                goBack();
+            } else if (button.id === "clear-tracking-btn") {
+                renderLandingPage();
+            }
+        });
+
+        document.body.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const button = form.querySelector('button[type="submit"]');
+            if (button) button.disabled = true;
+
+            try {
+                if (form.id === "track-request-form") {
+                    const vehicleNumber = document.getElementById("track-id-input").value.trim().toUpperCase();
+                    if (!vehicleNumber) { return; }
+                    
+                    const loadingHTML = `<div class="p-4 text-center"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mx-auto"></div></div>`;
+                    renderLandingPage({ trackingResultHTML: loadingHTML, vehicleNumber: vehicleNumber });
+
+                    if (!auth.currentUser) await signInAnonymously(auth);
+                    const status = await findCurrentVehicleStatus(vehicleNumber);
+                    if (status) {
+                        renderLandingPage({ trackingResultHTML: createStatusCard(status), vehicleNumber });
+                    } else {
+                        const notFoundHTML = `<div class="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-center"><p class="font-semibold text-red-400">No records found for ${vehicleNumber}</p></div>`;
+                        renderLandingPage({ trackingResultHTML: notFoundHTML, vehicleNumber });
+                    }
+
+                } else if (form.id === "request-form") {
+                    if (!form.checkValidity()) {
+                        showNotification("Please fill out all required fields.", "error");
+                        return;
+                    }
+                    const data = getFormObj(form);
+                    const entryDate = parseLocalDate(data.entryDate);
+                    
+                    const now = new Date();
+                    let minDate = new Date();
+                    minDate.setHours(0,0,0,0);
+                    if (now.getHours() >= 14) minDate.setDate(minDate.getDate() + 1);
+
+                    if (!entryDate || entryDate < minDate) {
+                        showNotification("Invalid date. Please select today (before 14:00) or a future date.", "error");
+                        return;
+                    }
+                    
+                    let notes = data.notes_purpose;
+                    if (notes === 'Other') {
+                        notes = data.notes_other || '';
+                    }
+
+                    const payload = {
+                        requesterName: data.requesterName, requesterEmail: data.requesterEmail, requesterContact: data.requesterContact,
+                        requesterId: auth.currentUser?.uid || 'offline', vehicleNumber: data.vehicleNumber.toUpperCase(), vehicleType: data.vehicleType,
+                        location: data.location, timeSlot: data.timeSlot, entryDate: Timestamp.fromDate(entryDate), expiryDate: Timestamp.fromDate(entryDate),
+                        notes: notes, escortRequired: false, status: "pending", createdAt: Timestamp.now()
+                    };
+
+                    if (navigator.onLine && auth.currentUser) {
+                        await addDoc(collection(db, "clearanceRequests"), payload);
+                        
+                        if (payload.requesterEmail) {
+                            try {
+                                const emailSubject = `Request Received: ${payload.vehicleNumber}`;
+                                const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
+                                const emailBody = generateNotificationEmail('pending', emailData);
+                                await sendEmail(payload.requesterEmail, emailSubject, emailBody);
+                            } catch (emailError) {
+                                showNotification("Request submitted, but confirmation email failed.", "error");
+                            }
+                        }
+                        showNotification("Request submitted successfully!");
+                        renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
+                    } else {
+                        await window.saveRequestForSync(payload);
+                        await window.registerBackgroundSync(); 
+                        showNotification("You are offline. Request saved.", "info");
+                        renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
+                    }
+                }
+            } catch(error) {
+                showNotification(`Error: ${error.message}`, "error");
+            } finally {
+                 if (button) button.disabled = false;
+            }
+        });
+
+        document.body.addEventListener("change", (e) => {
+            if (e.target.id === 'request-entry-date') {
+                const expiryDateInput = document.getElementById('request-expiry-date');
+                if (expiryDateInput) expiryDateInput.value = e.target.value;
+            }
+             if (e.target.id === 'notes-purpose-select') {
+                const otherInput = document.getElementById('notes-other-input');
+                if (e.target.value === 'Other') {
+                    otherInput.classList.remove('hidden');
+                    otherInput.required = true;
+                } else {
+                    otherInput.classList.add('hidden');
+                    otherInput.required = false;
+                    otherInput.value = '';
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+
