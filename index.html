@@ -452,7 +452,11 @@
                             const emailSubject = `Request Received: ${payload.vehicleNumber}`;
                             const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
                             const emailBody = generateNotificationEmail('pending', emailData);
-                            await sendEmail(payload.requesterEmail, emailBody, emailSubject);
+                            // ==================================================================
+                            // === THIS IS THE ONLY LINE THAT HAS BEEN CHANGED ===
+                            // The subject and body arguments are now in the correct order.
+                            await sendEmail(payload.requesterEmail, emailSubject, emailBody);
+                            // ==================================================================
                         } catch (emailError) {
                             emailErrorOccurred = true;
                             showNotification("Request submitted, but confirmation email failed to send.", "error");
