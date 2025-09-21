@@ -4,7 +4,6 @@
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
     <title>Vehicle Clearance Request</title>
-    <!-- The manifest is now generated and injected by the script below -->
     <link rel="apple-touch-icon" href="https://pccvehicle.github.io/vehicle-clearance-/apple-touch-icon.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -15,7 +14,7 @@
             font-family: 'Inter', sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-            background-color: #1e293b; /* Dark Slate Blue */
+            background-color: #1e293b;
         }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
@@ -80,7 +79,6 @@
         const icons = {
             request: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"></path><path d="M9 18h6"></path><path d="M2 22v-2a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v2"></path></svg>`,
             search: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>`,
-            x: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
         };
 
         const formatDate = (date) => {
@@ -162,10 +160,9 @@
                     body: JSON.stringify({ to, subject, htmlBody }),
                 });
                 if (!response.ok) throw new Error('Email service HTTP ' + response.status);
-                return true;
             } catch (error) {
                 console.error('Failed to send email:', error);
-                throw error; // Re-throw to be caught by the caller
+                throw error;
             }
         };
 
@@ -442,38 +439,31 @@
 
                     const payload = {
                         requesterName: data.requesterName, requesterEmail: data.requesterEmail, requesterContact: data.requesterContact,
-                        requesterId: auth.currentUser?.uid || 'offline', vehicleNumber: data.vehicleNumber.toUpperCase(), vehicleType: data.vehicleType,
+                        requesterId: auth.currentUser?.uid, vehicleNumber: data.vehicleNumber.toUpperCase(), vehicleType: data.vehicleType,
                         location: data.location, timeSlot: data.timeSlot, entryDate: Timestamp.fromDate(entryDate), expiryDate: Timestamp.fromDate(entryDate),
                         notes: notes, escortRequired: false, status: "pending", createdAt: Timestamp.now()
                     };
-
-                    if (navigator.onLine && auth.currentUser) {
-                        await addDoc(collection(db, "clearanceRequests"), payload);
-                        let emailErrorOccurred = false;
-                        
-                        if (payload.requesterEmail) {
-                            try {
-                                const emailSubject = `Request Received: ${payload.vehicleNumber}`;
-                                const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
-                                const emailBody = generateNotificationEmail('pending', emailData);
-                                await sendEmail(payload.requesterEmail, emailSubject, emailBody);
-                            } catch (emailError) {
-                                emailErrorOccurred = true;
-                                showNotification("Request submitted, but confirmation email failed to send.", "error");
-                            }
+                    
+                    await addDoc(collection(db, "clearanceRequests"), payload);
+                    
+                    let emailErrorOccurred = false;
+                    if (payload.requesterEmail) {
+                        try {
+                            const emailSubject = `Request Received: ${payload.vehicleNumber}`;
+                            const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
+                            const emailBody = generateNotificationEmail('pending', emailData);
+                            await sendEmail(payload.requesterEmail, emailBody, emailSubject);
+                        } catch (emailError) {
+                            emailErrorOccurred = true;
+                            showNotification("Request submitted, but confirmation email failed to send.", "error");
                         }
-
-                        if (!emailErrorOccurred) {
-                            showNotification("Request submitted successfully!");
-                        }
-                        
-                        renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
-
-                    } else {
-                        // The offline logic using the Service Worker is no longer active.
-                        // We can add a simple notification for this case.
-                        showNotification("You appear to be offline. Please connect to the internet to submit a request.", "error");
                     }
+
+                    if (!emailErrorOccurred) {
+                        showNotification("Request submitted successfully!");
+                    }
+                    
+                    renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
                 }
             } catch(error) {
                 showNotification(`Error: ${error.message}`, "error");
