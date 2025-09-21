@@ -603,6 +603,7 @@
 
                     if (navigator.onLine && auth.currentUser) {
                         await addDoc(collection(db, "clearanceRequests"), payload);
+                        let emailErrorOccurred = false;
                         
                         if (payload.requesterEmail) {
                             try {
@@ -611,11 +612,17 @@
                                 const emailBody = generateNotificationEmail('pending', emailData);
                                 await sendEmail(payload.requesterEmail, emailSubject, emailBody);
                             } catch (emailError) {
-                                showNotification("Request submitted, but confirmation email failed.", "error");
+                                emailErrorOccurred = true;
+                                showNotification("Request submitted, but confirmation email failed to send.", "error");
                             }
                         }
-                        showNotification("Request submitted successfully!");
+
+                        if (!emailErrorOccurred) {
+                            showNotification("Request submitted successfully!");
+                        }
+                        
                         renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
+
                     } else {
                         await window.saveRequestForSync(payload);
                         await window.registerBackgroundSync(); 
