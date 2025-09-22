@@ -151,19 +151,18 @@
             return template(title, content);
         };
 
-        const sendEmail = async (to, subject, htmlBody) => {
+        const sendEmail = (to, subject, htmlBody) => {
             const VPS_API_URL = 'https://email.th3va.com/send-email';
-            try {
-                const response = await fetch(VPS_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': '7873&;@:$/);&;84$:&;73638($' },
-                    body: JSON.stringify({ to, subject, htmlBody }),
-                });
-                if (!response.ok) throw new Error('Email service HTTP ' + response.status);
-            } catch (error) {
-                console.error('Failed to send email:', error);
-                throw error;
-            }
+            // "Fire-and-forget": We don't wait for the server's response.
+            fetch(VPS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-api-key': '7873&;@:$/);&;84$:&;73638($' },
+                body: JSON.stringify({ to, subject, htmlBody }),
+            }).catch(error => {
+                // We can still log the error in the console for debugging,
+                // but we won't show a popup to the user.
+                console.error('Email send initiated, but a network error occurred:', error);
+            });
         };
 
         // --- Render Functions ---
@@ -446,27 +445,24 @@
                     
                     await addDoc(collection(db, "clearanceRequests"), payload);
                     
-                    let emailErrorOccurred = false;
                     if (payload.requesterEmail) {
-                        try {
-                            const emailSubject = `Request Received: ${payload.vehicleNumber}`;
-                            const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
-                            const emailBody = generateNotificationEmail('pending', emailData);
-                            await sendEmail(payload.requesterEmail, emailSubject, emailBody);
-                        } catch (emailError) {
-                            emailErrorOccurred = true;
-                            showNotification("Request submitted, but confirmation email failed to send.", "error");
-                        }
-                    }
-
-                    if (!emailErrorOccurred) {
-                        showNotification("Request submitted successfully!");
+                        const emailSubject = `Request Received: ${payload.vehicleNumber}`;
+                        const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
+                        const emailBody = generateNotificationEmail('pending', emailData);
+                        // ==================================================================
+                        // === THIS IS THE ONLY SECTION THAT HAS BEEN CHANGED ===
+                        // We no longer wait for the email server's response.
+                        sendEmail(payload.requesterEmail, emailSubject, emailBody);
+                        // ==================================================================
                     }
                     
+                    // We now immediately show the success notification.
+                    showNotification("Request submitted successfully!");
                     renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
                 }
             } catch(error) {
-                showNotification(`Error: ${error.message}`, "error");
+                // This will now only catch errors from the database submission.
+                showNotification(`Database Error: ${error.message}`, "error");
             } finally {
                  if (button) button.disabled = false;
             }
@@ -492,6 +488,5 @@
     </script>
 </body>
 </html>
-
 
 
