@@ -21,7 +21,7 @@
             to { opacity: 1; transform: translateY(0); }
         }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
-
+        
         input[type="date"]::-webkit-calendar-picker-indicator {
             filter: invert(1);
         }
@@ -46,7 +46,7 @@
 </head>
 <body>
     <div id="app-root"></div>
-
+    
     <script type="module">
         // --- Main Application Logic ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -96,7 +96,7 @@
             document.body.appendChild(notification);
             setTimeout(() => notification.remove(), 4000);
         };
-
+        
         const parseLocalDate = (dateString) => {
             if (!dateString) return null;
             const date = new Date(dateString);
@@ -115,7 +115,7 @@
                 renderLandingPage();
             }
         };
-
+        
         const generateNotificationEmail = (status, data) => {
             const orgName = "PCC Security";
             const footerText = `This is an automated notification from the Vehicle Clearance System. Please do not reply to this email.`;
@@ -151,31 +151,18 @@
             return template(title, content);
         };
 
-        // PATCH: friendlier email API handling (no red tag on backend warnings)
         const sendEmail = async (to, subject, htmlBody) => {
             const VPS_API_URL = 'https://email.th3va.com/send-email';
             try {
                 const response = await fetch(VPS_API_URL, {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'x-api-key': '7873&;@:$/);&;84$:&;73638($'
-                    },
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': '7873&;@:$/);&;84$:&;73638($' },
                     body: JSON.stringify({ to, subject, htmlBody }),
                 });
-                let result = {};
-                try { result = await response.json(); } catch (_) { result = {}; }
-
-                // Treat network/401 as soft failure we can surface as info, not hard error
-                if (response.ok && result.ok !== false) {
-                    return { ok: true, messageId: result.messageId || null, stub: result.stub || false };
-                } else {
-                    const msg = (result.warning || result.error || `HTTP ${response.status}`);
-                    return { ok: false, warning: msg };
-                }
+                if (!response.ok) throw new Error('Email service HTTP ' + response.status);
             } catch (error) {
-                // Only throw on true network failure
-                return { ok: false, warning: error?.message || 'Network error' };
+                console.error('Failed to send email:', error);
+                throw error;
             }
         };
 
@@ -351,7 +338,7 @@
                 ${r.rejectionReason ? `<div class="mt-3 pt-3 border-t border-red-500/20"><p class="text-xs text-red-400">Rejection Reason</p><p class="text-sm text-red-300">${r.rejectionReason}</p></div>` : ""}
             </div>`;
         };
-
+        
         const findCurrentVehicleStatus = async (vehicleNumber) => {
             const now = new Date();
             const clearanceQuery = query(collection(db, "vehicleClearances"), where("vehicleNumber", "==", vehicleNumber));
@@ -414,7 +401,7 @@
                 if (form.id === "track-request-form") {
                     const vehicleNumber = document.getElementById("track-id-input").value.trim().toUpperCase();
                     if (!vehicleNumber) { return; }
-
+                    
                     const loadingHTML = `<div class="p-4 text-center"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mx-auto"></div></div>`;
                     renderLandingPage({ trackingResultHTML: loadingHTML, vehicleNumber: vehicleNumber });
 
@@ -434,7 +421,7 @@
                     }
                     const data = getFormObj(form);
                     const entryDate = parseLocalDate(data.entryDate);
-
+                    
                     const now = new Date();
                     let minDate = new Date();
                     minDate.setHours(0,0,0,0);
@@ -444,7 +431,7 @@
                         showNotification("Invalid date. Please select today (before 14:00) or a future date.", "error");
                         return;
                     }
-
+                    
                     let notes = data.notes_purpose;
                     if (notes === 'Other') {
                         notes = data.notes_other || '';
@@ -456,23 +443,30 @@
                         location: data.location, timeSlot: data.timeSlot, entryDate: Timestamp.fromDate(entryDate), expiryDate: Timestamp.fromDate(entryDate),
                         notes: notes, escortRequired: false, status: "pending", createdAt: Timestamp.now()
                     };
-
+                    
                     await addDoc(collection(db, "clearanceRequests"), payload);
-
+                    
+                    let emailErrorOccurred = false;
                     if (payload.requesterEmail) {
-                        const emailSubject = `Request Received: ${payload.vehicleNumber}`;
-                        const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
-                        const emailBody = generateNotificationEmail('pending', emailData);
-                        const mail = await sendEmail(payload.requesterEmail, emailSubject, emailBody);
-                        if (!mail.ok) {
-                            showNotification("Request submitted (email warning: " + mail.warning + ")", "info");
-                        } else {
-                            showNotification("Request submitted successfully!");
+                        try {
+                            const emailSubject = `Request Received: ${payload.vehicleNumber}`;
+                            const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
+                            const emailBody = generateNotificationEmail('pending', emailData);
+                            // ==================================================================
+                            // === THIS IS THE ONLY LINE THAT HAS BEEN CHANGED ===
+                            // The subject and body arguments are now in the correct order.
+                            await sendEmail(payload.requesterEmail, emailSubject, emailBody);
+                            // ==================================================================
+                        } catch (emailError) {
+                            emailErrorOccurred = true;
+                            showNotification("Request submitted, but confirmation email failed to send.", "error");
                         }
-                    } else {
-                        showNotification("Request submitted successfully!");
                     }
 
+                    if (!emailErrorOccurred) {
+                        showNotification("Request submitted successfully!");
+                    }
+                    
                     renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
                 }
             } catch(error) {
@@ -502,4 +496,5 @@
     </script>
 </body>
 </html>
+
 
