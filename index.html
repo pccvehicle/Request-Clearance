@@ -159,8 +159,6 @@
                 headers: { 'Content-Type': 'application/json', 'x-api-key': '7873&;@:$/);&;84$:&;73638($' },
                 body: JSON.stringify({ to, subject, htmlBody }),
             }).catch(error => {
-                // We can still log the error in the console for debugging,
-                // but we won't show a popup to the user.
                 console.error('Email send initiated, but a network error occurred:', error);
             });
         };
@@ -289,7 +287,11 @@
                             <label class="text-sm font-medium text-slate-300">Purpose of Entry</label>
                             <select id="notes-purpose-select" name="notes_purpose" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white">
                                 <option value="Meeting">Meeting</option>
-                                <option value="Other">Other</option>
+                                <option value="Visit">Visit</option>
+                                <option value="Maintenance">Maintenance</option>
+                                <option value="Delivery">Delivery</option>
+                                <option value="Towing">Towing</option>
+                                <option value="Others">Others</option>
                             </select>
                              <input type="text" id="notes-other-input" name="notes_other" class="hidden mobile-input mt-2 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" placeholder="Please specify purpose" />
                         </div>
@@ -414,10 +416,19 @@
                     }
 
                 } else if (form.id === "request-form") {
+                    
                     if (!form.checkValidity()) {
-                        showNotification("Please fill out all required fields.", "error");
+                        const dateInput = document.getElementById('request-entry-date');
+                        // Check if the form is specifically failing because the date is earlier than the min date 
+                        // (which shifts forward to tomorrow after 14:00 today).
+                        if (dateInput && dateInput.validity.rangeUnderflow) {
+                            showNotification("Requests for today must be submitted before 14:00hrs.", "error");
+                        } else {
+                            showNotification("Please fill out all required fields.", "error");
+                        }
                         return;
                     }
+
                     const data = getFormObj(form);
                     const entryDate = parseLocalDate(data.entryDate);
                     
@@ -427,12 +438,12 @@
                     if (now.getHours() >= 14) minDate.setDate(minDate.getDate() + 1);
 
                     if (!entryDate || entryDate < minDate) {
-                        showNotification("Invalid date. Please select today (before 14:00) or a future date.", "error");
+                        showNotification("Requests for today must be submitted before 14:00hrs.", "error");
                         return;
                     }
                     
                     let notes = data.notes_purpose;
-                    if (notes === 'Other') {
+                    if (notes === 'Others') {
                         notes = data.notes_other || '';
                     }
 
@@ -475,7 +486,7 @@
             }
              if (e.target.id === 'notes-purpose-select') {
                 const otherInput = document.getElementById('notes-other-input');
-                if (e.target.value === 'Other') {
+                if (e.target.value === 'Others') {
                     otherInput.classList.remove('hidden');
                     otherInput.required = true;
                 } else {
@@ -488,6 +499,5 @@
     </script>
 </body>
 </html>
-
 
 
