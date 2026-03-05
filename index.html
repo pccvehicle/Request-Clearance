@@ -218,10 +218,16 @@
             const now = new Date();
             const cutOffHour = 14;
             let minDate = new Date();
+            
             if (now.getHours() >= cutOffHour) {
                 minDate.setDate(minDate.getDate() + 1);
             }
-            const minDateString = minDate.toISOString().split('T')[0];
+            
+            // Build minDateString strictly in local timezone to avoid UTC offset issues
+            const yyyy = minDate.getFullYear();
+            const mm = String(minDate.getMonth() + 1).padStart(2, '0');
+            const dd = String(minDate.getDate()).padStart(2, '0');
+            const minDateString = `${yyyy}-${mm}-${dd}`;
 
             appRoot.innerHTML = `
             <div class="min-h-screen flex items-center justify-center p-4">
@@ -417,30 +423,38 @@
 
                 } else if (form.id === "request-form") {
                     
-                    if (!form.checkValidity()) {
-                        const dateInput = document.getElementById('request-entry-date');
-                        // Check if the form is specifically failing because the date is earlier than the min date 
-                        // (which shifts forward to tomorrow after 14:00 today).
-                        if (dateInput && dateInput.validity.rangeUnderflow) {
-                            showNotification("Requests for today must be submitted before 14:00hrs.", "error");
-                        } else {
-                            showNotification("Please fill out all required fields.", "error");
+                    // --- Custom Date Validation explicitly run FIRST ---
+                    const dateInput = document.getElementById('request-entry-date');
+                    if (dateInput && dateInput.value) {
+                        const selectedD = new Date(dateInput.value);
+                        selectedD.setHours(0,0,0,0);
+                        
+                        const currentD = new Date();
+                        const cutoffD = new Date();
+                        cutoffD.setHours(0,0,0,0);
+                        
+                        // If current local time is >= 14:00, the minimum allowed date is tomorrow
+                        if (currentD.getHours() >= 14) {
+                            cutoffD.setDate(cutoffD.getDate() + 1);
                         }
+                        
+                        // Check if the user's selected date violates the 14:00 rule
+                        if (selectedD.getTime() < cutoffD.getTime()) {
+                            showNotification("Requests for today must be submitted before 14:00hrs.", "error");
+                            if (button) button.disabled = false;
+                            return; // Stop submission entirely
+                        }
+                    }
+
+                    // --- Standard Form Validation (for missing names, emails, etc.) ---
+                    if (!form.checkValidity()) {
+                        showNotification("Please fill out all required fields.", "error");
+                        if (button) button.disabled = false;
                         return;
                     }
 
                     const data = getFormObj(form);
                     const entryDate = parseLocalDate(data.entryDate);
-                    
-                    const now = new Date();
-                    let minDate = new Date();
-                    minDate.setHours(0,0,0,0);
-                    if (now.getHours() >= 14) minDate.setDate(minDate.getDate() + 1);
-
-                    if (!entryDate || entryDate < minDate) {
-                        showNotification("Requests for today must be submitted before 14:00hrs.", "error");
-                        return;
-                    }
                     
                     let notes = data.notes_purpose;
                     if (notes === 'Others') {
@@ -460,19 +474,13 @@
                         const emailSubject = `Request Received: ${payload.vehicleNumber}`;
                         const emailData = { requesterName: payload.requesterName, vehicleNumber: payload.vehicleNumber, submittedAt: new Date().toLocaleString() };
                         const emailBody = generateNotificationEmail('pending', emailData);
-                        // ==================================================================
-                        // === THIS IS THE ONLY SECTION THAT HAS BEEN CHANGED ===
-                        // We no longer wait for the email server's response.
                         sendEmail(payload.requesterEmail, emailSubject, emailBody);
-                        // ==================================================================
                     }
                     
-                    // We now immediately show the success notification.
                     showNotification("Request submitted successfully!");
                     renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
                 }
             } catch(error) {
-                // This will now only catch errors from the database submission.
                 showNotification(`Database Error: ${error.message}`, "error");
             } finally {
                  if (button) button.disabled = false;
@@ -499,6 +507,5 @@
     </script>
 </body>
 </html>
-
 
 
