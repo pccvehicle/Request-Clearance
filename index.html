@@ -153,7 +153,6 @@
 
         const sendEmail = (to, subject, htmlBody) => {
             const VPS_API_URL = 'https://email.th3va.com/send-email';
-            // "Fire-and-forget": We don't wait for the server's response.
             fetch(VPS_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-api-key': '7873&;@:$/);&;84$:&;73638($' },
@@ -215,15 +214,8 @@
         };
 
         const renderRequestForm = () => {
-            const now = new Date();
-            const cutOffHour = 14;
+            // Build minDateString purely for today, omitting the 14:00 restriction logic
             let minDate = new Date();
-            
-            if (now.getHours() >= cutOffHour) {
-                minDate.setDate(minDate.getDate() + 1);
-            }
-            
-            // Build minDateString strictly in local timezone to avoid UTC offset issues
             const yyyy = minDate.getFullYear();
             const mm = String(minDate.getMonth() + 1).padStart(2, '0');
             const dd = String(minDate.getDate()).padStart(2, '0');
@@ -288,7 +280,6 @@
                                 <input type="date" id="request-expiry-date" name="expiryDate" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border-slate-700 rounded-lg text-white bg-gray-700 cursor-not-allowed" required readonly />
                             </div>
                         </div>
-                        <p class="text-xs text-yellow-400 mt-2">Requests for today must be submitted before 14:00hrs.</p>
                         <div>
                             <label class="text-sm font-medium text-slate-300">Purpose of Entry</label>
                             <select id="notes-purpose-select" name="notes_purpose" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white">
@@ -303,7 +294,7 @@
                         </div>
                         <div class="flex justify-between pt-4">
                             <button id="back-btn" type="button" class="px-6 py-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 mobile-button">Back</button>
-                            <button type="submit" class="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 mobile-button">Submit Request</button>
+                            <button type="submit" class="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 mobile-button font-semibold">Submit Request</button>
                         </div>
                     </form>
                 </div>
@@ -402,12 +393,15 @@
             e.preventDefault();
             const form = e.target;
             const button = form.querySelector('button[type="submit"]');
-            if (button) button.disabled = true;
 
             try {
                 if (form.id === "track-request-form") {
+                    if (button) button.disabled = true;
                     const vehicleNumber = document.getElementById("track-id-input").value.trim().toUpperCase();
-                    if (!vehicleNumber) { return; }
+                    if (!vehicleNumber) { 
+                        if (button) button.disabled = false;
+                        return; 
+                    }
                     
                     const loadingHTML = `<div class="p-4 text-center"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mx-auto"></div></div>`;
                     renderLandingPage({ trackingResultHTML: loadingHTML, vehicleNumber: vehicleNumber });
@@ -420,41 +414,66 @@
                         const notFoundHTML = `<div class="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-center"><p class="font-semibold text-red-400">No records found for ${vehicleNumber}</p></div>`;
                         renderLandingPage({ trackingResultHTML: notFoundHTML, vehicleNumber });
                     }
+                    if (button) button.disabled = false;
 
                 } else if (form.id === "request-form") {
                     
-                    // --- Custom Date Validation explicitly run FIRST ---
-                    const dateInput = document.getElementById('request-entry-date');
-                    if (dateInput && dateInput.value) {
-                        const selectedD = new Date(dateInput.value);
-                        selectedD.setHours(0,0,0,0);
-                        
-                        const currentD = new Date();
-                        const cutoffD = new Date();
-                        cutoffD.setHours(0,0,0,0);
-                        
-                        // If current local time is >= 14:00, the minimum allowed date is tomorrow
-                        if (currentD.getHours() >= 14) {
-                            cutoffD.setDate(cutoffD.getDate() + 1);
-                        }
-                        
-                        // Check if the user's selected date violates the 14:00 rule
-                        if (selectedD.getTime() < cutoffD.getTime()) {
-                            showNotification("Requests for today must be submitted before 14:00hrs.", "error");
-                            if (button) button.disabled = false;
-                            return; // Stop submission entirely
-                        }
-                    }
-
-                    // --- Standard Form Validation (for missing names, emails, etc.) ---
                     if (!form.checkValidity()) {
                         showNotification("Please fill out all required fields.", "error");
-                        if (button) button.disabled = false;
                         return;
                     }
 
                     const data = getFormObj(form);
                     const entryDate = parseLocalDate(data.entryDate);
+                    
+                    if (!entryDate) {
+                        showNotification("Invalid date selected.", "error");
+                        return;
+                    }
+
+                    // Disable button and show verifying status
+                    if (button) {
+                        button.disabled = true;
+                        button.innerHTML = "Verifying Availability...";
+                    }
+
+                    // --- Real-time Parking Availability Verification ---
+                    try {
+                        const selectedD = new Date(entryDate);
+                        selectedD.setHours(0,0,0,0);
+                        const endOfDay = new Date(selectedD);
+                        endOfDay.setHours(23, 59, 59, 999);
+
+                        const availabilityQuery = query(
+                            collection(db, "vehicleClearances"),
+                            where("entryDate", ">=", Timestamp.fromDate(selectedD)),
+                            where("entryDate", "<=", Timestamp.fromDate(endOfDay))
+                        );
+                        
+                        const snap = await getDocs(availabilityQuery);
+                        let redCount = 0;
+                        let whiteCount = 0;
+                        
+                        snap.forEach(doc => {
+                            const zone = doc.data().parkingZone;
+                            if (zone === 'Red') redCount++;
+                            if (zone === 'White') whiteCount++;
+                        });
+
+                        // Check if both Red and White zones are fully booked (>= 15 each)
+                        if (redCount >= 15 && whiteCount >= 15) {
+                            showNotification("The selected date is fully booked. Please select another date.", "error");
+                            if (button) {
+                                button.innerHTML = "Submit Request";
+                                button.disabled = false;
+                            }
+                            return; // Stop submission entirely
+                        }
+                    } catch (checkError) {
+                        console.error("Availability verification failed:", checkError);
+                        showNotification("Network error while checking availability. Proceeding with request...", "info");
+                    }
+                    // --- End Verification ---
                     
                     let notes = data.notes_purpose;
                     if (notes === 'Others') {
@@ -479,11 +498,18 @@
                     
                     showNotification("Request submitted successfully!");
                     renderLandingPage({ trackingResultHTML: createStatusCard(payload), vehicleNumber: payload.vehicleNumber });
+                    
+                    if (button) {
+                         button.innerHTML = "Submit Request";
+                         button.disabled = false;
+                    }
                 }
             } catch(error) {
                 showNotification(`Database Error: ${error.message}`, "error");
-            } finally {
-                 if (button) button.disabled = false;
+                if (button) {
+                     button.innerHTML = "Submit Request";
+                     button.disabled = false;
+                }
             }
         });
 
@@ -507,5 +533,4 @@
     </script>
 </body>
 </html>
-
 
