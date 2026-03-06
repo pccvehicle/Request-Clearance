@@ -51,7 +51,7 @@
         // --- Main Application Logic ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, Timestamp, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, Timestamp, query, where, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Configuration ---
         const firebaseConfig = {
@@ -214,7 +214,7 @@
         };
 
         const renderRequestForm = () => {
-            // Build minDateString purely for today, omitting the 14:00 restriction logic
+            // Build minDateString purely for today
             let minDate = new Date();
             const yyyy = minDate.getFullYear();
             const mm = String(minDate.getMonth() + 1).padStart(2, '0');
@@ -437,8 +437,22 @@
                         button.innerHTML = "Verifying Availability...";
                     }
 
-                    // --- Real-time Parking Availability Verification ---
+                    // --- Real-time Dynamic Parking Availability Verification ---
                     try {
+                        // 1. Fetch current max capacities from the admin configuration
+                        let maxRed = 15; // default fallback (10 alloc + 5 buffer)
+                        let maxWhite = 15; // default fallback
+                        
+                        const configRef = doc(db, "publicConfig", "parkingSettings");
+                        const configSnap = await getDoc(configRef);
+                        
+                        if (configSnap.exists()) {
+                            const configData = configSnap.data();
+                            maxRed = (parseInt(configData.Red?.allocated) || 0) + (parseInt(configData.Red?.buffer) || 0);
+                            maxWhite = (parseInt(configData.White?.allocated) || 0) + (parseInt(configData.White?.buffer) || 0);
+                        }
+
+                        // 2. Query existing assigned bookings for the selected date
                         const selectedD = new Date(entryDate);
                         selectedD.setHours(0,0,0,0);
                         const endOfDay = new Date(selectedD);
@@ -460,8 +474,8 @@
                             if (zone === 'White') whiteCount++;
                         });
 
-                        // Check if both Red and White zones are fully booked (>= 15 each)
-                        if (redCount >= 15 && whiteCount >= 15) {
+                        // 3. Check if both Red and White zones have met/exceeded their dynamic limits
+                        if (redCount >= maxRed && whiteCount >= maxWhite) {
                             showNotification("The selected date is fully booked. Please select another date.", "error");
                             if (button) {
                                 button.innerHTML = "Submit Request";
