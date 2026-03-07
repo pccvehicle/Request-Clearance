@@ -231,15 +231,31 @@
                     </div>
                     <form id="request-form" class="space-y-4 text-left" novalidate>
                         <div>
-                            <label class="text-sm font-medium text-slate-300">Your Name</label>
+                            <label class="text-sm font-medium text-slate-300">Driver/Owner Name</label>
                             <input name="requesterName" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" placeholder="e.g. John Doe" required />
                         </div>
                         <div>
-                            <label class="text-sm font-medium text-slate-300">Your Email Address</label>
+                            <label class="text-sm font-medium text-slate-300">Host</label>
+                            <select id="host-select" name="host_select" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required>
+                                <option value="">Select host...</option>
+                                <option value="A DIV">A DIV</option>
+                                <option value="CAD">CAD</option>
+                                <option value="CID">CID</option>
+                                <option value="CNB">CNB</option>
+                                <option value="CPG/SMM">CPG/SMM</option>
+                                <option value="HTX">HTX</option>
+                                <option value="PRD">PRD</option>
+                                <option value="VSC HQ">VSC HQ</option>
+                                <option value="Others">Others</option>
+                            </select>
+                            <input type="text" id="host-other-input" name="host_other" class="hidden mobile-input mt-2 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" placeholder="Please specify host" />
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium text-slate-300">Email Address</label>
                             <input type="email" name="requesterEmail" placeholder="you@example.com" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required />
                         </div>
                         <div>
-                            <label class="text-sm font-medium text-slate-300">Your Contact Number</label>
+                            <label class="text-sm font-medium text-slate-300">Contact Number</label>
                             <input type="tel" name="requesterContact" placeholder="e.g., 65 8779 9808" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required />
                         </div>
                         <div>
@@ -256,7 +272,7 @@
                             </select>
                         </div>
                         <div>
-                            <label class="text-sm font-medium text-slate-300">Location</label>
+                            <label class="text-sm font-medium text-slate-300">Parking Location</label>
                             <select name="location" class="mobile-input mt-1 w-full p-3 bg-slate-900/70 border border-slate-700 rounded-lg text-white" required>
                                 <option value="PCC" selected>PCC</option>
                             </select>
@@ -315,6 +331,7 @@
             const timeSlotText = r.timeSlot ? r.timeSlot.replace('-', ' to ').replace('onwards', ' onwards') : 'N/A';
             const contact = r.requesterContact || r.ownerContact || 'N/A';
             const name = r.requesterName || r.ownerName || 'N/A';
+            const host = r.host || 'N/A';
 
             return `
             <div class="p-4 ${config.bg} ${config.border} rounded-xl border text-left animate-fade-in">
@@ -327,9 +344,10 @@
                     <span class="px-2 py-1 rounded-full text-xs font-medium ${config.color} ${config.bg} border ${config.border}">${config.text}</span>
                 </div>
                 <div class="grid grid-cols-2 gap-3 text-sm">
-                    <div><p class="text-xs text-slate-400">Name</p><p class="font-semibold text-slate-200">${name}</p></div>
+                    <div><p class="text-xs text-slate-400">Driver/Owner Name</p><p class="font-semibold text-slate-200">${name}</p></div>
                     <div><p class="text-xs text-slate-400">Contact</p><p class="font-semibold text-slate-200">${contact}</p></div>
-                    <div><p class="text-xs text-slate-400">Location</p><p class="font-semibold text-slate-200">${r.location}</p></div>
+                    <div><p class="text-xs text-slate-400">Host</p><p class="font-semibold text-slate-200">${host}</p></div>
+                    <div><p class="text-xs text-slate-400">Parking Location</p><p class="font-semibold text-slate-200">${r.location}</p></div>
                     <div><p class="text-xs text-slate-400">Visiting Hours</p><p class="font-semibold text-slate-200">${timeSlotText}</p></div>
                     <div class="col-span-2"><p class="text-xs text-slate-400">Valid Period</p><p class="font-semibold text-slate-200">${formatDate(r.entryDate)} - ${formatDate(r.expiryDate)}</p></div>
                 </div>
@@ -495,10 +513,15 @@
                         notes = data.notes_other || '';
                     }
 
+                    let host = data.host_select;
+                    if (host === 'Others') {
+                        host = data.host_other || '';
+                    }
+
                     const payload = {
                         requesterName: data.requesterName, requesterEmail: data.requesterEmail, requesterContact: data.requesterContact,
                         requesterId: auth.currentUser?.uid, vehicleNumber: data.vehicleNumber.toUpperCase(), vehicleType: data.vehicleType,
-                        location: data.location, timeSlot: data.timeSlot, entryDate: Timestamp.fromDate(entryDate), expiryDate: Timestamp.fromDate(entryDate),
+                        host: host, location: data.location, timeSlot: data.timeSlot, entryDate: Timestamp.fromDate(entryDate), expiryDate: Timestamp.fromDate(entryDate),
                         notes: notes, escortRequired: false, status: "pending", createdAt: Timestamp.now()
                     };
                     
@@ -533,7 +556,7 @@
                 const expiryDateInput = document.getElementById('request-expiry-date');
                 if (expiryDateInput) expiryDateInput.value = e.target.value;
             }
-             if (e.target.id === 'notes-purpose-select') {
+            if (e.target.id === 'notes-purpose-select') {
                 const otherInput = document.getElementById('notes-other-input');
                 if (e.target.value === 'Others') {
                     otherInput.classList.remove('hidden');
@@ -544,8 +567,20 @@
                     otherInput.value = '';
                 }
             }
+            if (e.target.id === 'host-select') {
+                const otherHostInput = document.getElementById('host-other-input');
+                if (e.target.value === 'Others') {
+                    otherHostInput.classList.remove('hidden');
+                    otherHostInput.required = true;
+                } else {
+                    otherHostInput.classList.add('hidden');
+                    otherHostInput.required = false;
+                    otherHostInput.value = '';
+                }
+            }
         });
     </script>
 </body>
 </html>
+
 
